@@ -6,7 +6,19 @@
 <title>Kindle Chess</title>
 <style>
   body { width: 758px; margin: 0 auto; font-family: sans-serif; text-align: center; }
-  #board { width: 720px; margin: 10px auto; display: grid; grid-template-columns: repeat(8, 1fr); border: 2px solid #000; }
+  #board {
+  width: 100%;
+  max-width: 720px;
+  margin: 10px auto;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  border: 2px solid #000;
+}
+
+.square {
+  aspect-ratio: 1 / 1;
+  font-size: 32px;
+}
   .square { width: 90px; height: 90px; line-height: 90px; font-size: 42px; }
   .light { background: #eee; }
   .dark { background: #aaa; }
