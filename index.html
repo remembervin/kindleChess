@@ -33,32 +33,17 @@
   .light { background: #eee; }
   .dark { background: #aaa; }
   .selected { outline: 3px solid black; }
+  .move { outline: 3px dashed black; }
 
-  #info {
-    font-size: 20px;
-    margin: 8px;
-  }
-
+  #info { font-size: 20px; margin: 8px; }
   #promotion { display:none; margin:10px; }
 
-  .promo-btn {
-    font-size: 30px;
-    padding: 8px;
-    margin: 4px;
-  }
+  .promo-btn { font-size: 30px; padding: 8px; margin: 4px; }
 
   .controls { margin: 8px; }
+  .controls button { font-size: 18px; padding: 6px 10px; margin: 4px; }
 
-  .controls button {
-    font-size: 18px;
-    padding: 6px 10px;
-    margin: 4px;
-  }
-
-  button {
-    font-size: 18px;
-    padding: 6px 10px;
-  }
+  button { font-size: 18px; padding: 6px 10px; }
 </style>
 </head>
 <body>
@@ -102,8 +87,25 @@ function initBoard(){
   draw();
 }
 
+function getLegalMoves(from){
+  const moves=[];
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      if(isValidMove(from,{r,c}) && isLegalMove(from,{r,c})){
+        moves.push({r,c});
+      }
+    }
+  }
+  return moves;
+}
+
 function draw(){
   const el=document.getElementById('board'); el.innerHTML='';
+
+  let legalMoves=[];
+  if(selected){
+    legalMoves = getLegalMoves(selected);
+  }
 
   for(let r=0;r<8;r++){
     for(let c=0;c<8;c++){
@@ -115,6 +117,14 @@ function draw(){
         sq.className += ' selected';
       }
 
+      // highlight legal moves
+      for(let i=0;i<legalMoves.length;i++){
+        if(legalMoves[i].r===r && legalMoves[i].c===c){
+          sq.className += ' move';
+          break;
+        }
+      }
+
       (function(rr,cc){ sq.onclick=function(){handleTap(rr,cc);} })(r,c);
       el.appendChild(sq);
     }
@@ -123,7 +133,6 @@ function draw(){
   let msg='Turn: '+capitalize(turn);
 
   if(gameOver){
-    // message already set
   } else if(isCheckmate(turn)){
     msg='Checkmate! '+(turn==='white'?'Black':'White')+' wins';
     gameOver=true;
