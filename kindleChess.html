@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=758">
+<title>Kindle Chess</title>
+<style>
+  body { width: 758px; margin: 0 auto; font-family: sans-serif; text-align: center; }
+  #board { width: 720px; margin: 10px auto; display: grid; grid-template-columns: repeat(8, 1fr); border: 2px solid #000; }
+  .square { width: 90px; height: 90px; line-height: 90px; font-size: 42px; }
+  .light { background: #eee; }
+  .dark { background: #aaa; }
+  .selected { outline: 4px solid black; }
+  #info { font-size: 22px; margin: 10px; }
+  #promotion { display:none; margin:10px; }
+  .promo-btn { font-size:36px; padding:10px; margin:5px; }
+  .controls { margin: 10px; }
+  .controls button { font-size: 20px; padding: 8px 14px; margin: 5px; }
+</style>
+</head>
+<body>
+
+<h2>Kindle Chess</h2>
+<div id="info">Turn: White</div>
+<div id="board"></div>
+<div id="promotion"></div>
+
+<div class="controls">
+  <button onclick="resign()">Resign</button>
+  <button onclick="offerDraw()">Offer Draw</button>
+  <button id="acceptDrawBtn" onclick="acceptDraw()" style="display:none;">Accept Draw</button>
+</div>
+
+<button onclick="resetGame()">Reset</button>
+
+<script>
+const pieces = { r:'♜',n:'♞',b:'♝',q:'♛',k:'♚',p:'♟',R:'♖',N:'♘',B:'♗',Q:'♕',K:'♔',P:'♙'};
+
+let board, selected=null, turn='white';
+let enPassant=null, pendingPromotion=null;
+let moved={};
+let gameOver=false;
+let drawOfferedBy=null;
+
+function initBoard(){
+  board=[
+    ['r','n','b','q','k','b','n','r'],
+    ['p','p','p','p','p','p','p','p'],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['','','','','','','',''],
+    ['P','P','P','P','P','P','P','P'],
+    ['R','N','B','Q','K','B','N','R']
+  ];
+  enPassant=null; turn='white'; selected=null; pendingPromotion=null; moved={};
+  gameOver=false; drawOfferedBy=null;
+  document.getElementById('acceptDrawBtn').style.display='none';
+  draw();
+}
+
+function draw(){
+  const el=document.getElementById('board'); el.innerHTML='';
+
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const sq=document.createElement('div');
+      sq.className='square '+((r+c)%2?'dark':'light');
+      sq.textContent=pieces[board[r][c]]||'';
+
+      if(selected && selected.r===r && selected.c===c){
+        sq.className += ' selected';
+      }
+
+      (function(rr,cc){ sq.onclick=function(){handleTap(rr,cc);} })(r,c);
+      el.appendChild(sq);
+    }
+  }
+
+  let msg='Turn: '+capitalize(turn);
+
+  if(gameOver){
+    // message already set
+  } else if(isCheckmate(turn)){
+    msg='Checkmate! '+(turn==='white'?'Black':'White')+' wins';
+    gameOver=true;
+  } else if(isStalemate(turn)){
+    msg='Stalemate! Draw';
+    gameOver=true;
+  } else if(isCheck(turn)){
+    msg='Check! '+msg;
+  }
+
+  if(drawOfferedBy && !gameOver){
+    msg += ' | Draw offered by ' + capitalize(drawOfferedBy);
+  }
+
+  document.getElementById('info').textContent=msg;
+}
+
+function handleTap(r,c){
+  if(gameOver || pendingPromotion) return;
+
+  const piece=board[r][c];
+
+  if(!selected){
+    if(piece && isOwnPiece(piece)) selected={r,c};
+  } else {
+    if(piece && isOwnPiece(piece)){
+      selected={r,c};
+    }
+    else if(selected.r===r && selected.c===c){
+      selected=null;
+    }
+    else{
+      if(isValidMove(selected,{r,c}) && isLegalMove(selected,{r,c})){
+        makeMove(selected,{r,c});
+        if(!pendingPromotion){
+          turn=(turn==='white')?'black':'white';
+          drawOfferedBy=null;
+          document.getElementById('acceptDrawBtn').style.display='none';
+        }
+      }
+      selected=null;
+    }
+  }
+
+  draw();
+}
+
+function resign(){
+  if(gameOver) return;
+  const winner = (turn==='white')?'Black':'White';
+  document.getElementById('info').textContent = winner + ' wins (resignation)';
+  gameOver = true;
+}
+
+function offerDraw(){
+  if(gameOver) return;
+  drawOfferedBy = turn;
+  document.getElementById('acceptDrawBtn').style.display='inline-block';
+  draw();
+}
+
+function acceptDraw(){
+  if(gameOver || !drawOfferedBy) return;
+  document.getElementById('info').textContent = 'Draw agreed';
+  gameOver = true;
+  drawOfferedBy = null;
+  document.getElementById('acceptDrawBtn').style.display='none';
+}
+
+function cloneBoard(b){ return JSON.parse(JSON.stringify(b)); }
+
+function isLegalMove(from,to){
+  const temp=cloneBoard(board);
+  const piece=temp[from.r][from.c];
+
+  if(piece.toLowerCase()==='k' && Math.abs(to.c-from.c)===2){
+    if(to.c===6){ temp[from.r][5]=temp[from.r][7]; temp[from.r][7]=''; }
+    else if(to.c===2){ temp[from.r][3]=temp[from.r][0]; temp[from.r][0]=''; }
+  }
+
+  temp[to.r][to.c]=piece;
+  temp[from.r][from.c]='';
+
+  return !isCheck(turn,temp);
+}
+
+function isCheck(color,b=board){
+  const king=findKing(color,b);
+  return isSquareAttacked(king.r,king.c,color==='white'?'black':'white',b);
+}
+
+function isCheckmate(color){ if(!isCheck(color)) return false; return !hasMoves(color); }
+function isStalemate(color){ if(isCheck(color)) return false; return !hasMoves(color); }
+
+function hasMoves(color){
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const p=board[r][c];
+      if(p && ((color==='white'&&p===p.toUpperCase())||(color==='black'&&p===p.toLowerCase()))){
+        for(let r2=0;r2<8;r2++){
+          for(let c2=0;c2<8;c2++){
+            if(isValidMove({r,c},{r:r2,c:c2}) && isLegalMove({r,c},{r:r2,c:c2})) return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function findKing(color,b){
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      if(b[r][c]===(color==='white'?'K':'k')) return {r,c};
+    }
+  }
+}
+
+function isSquareAttacked(r,c,byColor,b){
+  for(let i=0;i<8;i++){
+    for(let j=0;j<8;j++){
+      const p=b[i][j]; if(!p) continue;
+      const isWhite=p===p.toUpperCase();
+      if((byColor==='white'&&!isWhite)||(byColor==='black'&&isWhite)) continue;
+
+      const dr=r-i, dc=c-j;
+
+      switch(p.toLowerCase()){
+        case 'p': const dir=isWhite?-1:1; if(dr===dir && Math.abs(dc)===1) return true; break;
+        case 'n': if((Math.abs(dr)===2&&Math.abs(dc)===1)||(Math.abs(dr)===1&&Math.abs(dc)===2)) return true; break;
+        case 'b': if(diagonalClear(i,j,r,c,b)) return true; break;
+        case 'r': if(straightClear(i,j,r,c,b)) return true; break;
+        case 'q': if(diagonalClear(i,j,r,c,b)||straightClear(i,j,r,c,b)) return true; break;
+        case 'k': if(Math.abs(dr)<=1&&Math.abs(dc)<=1) return true; break;
+      }
+    }
+  }
+  return false;
+}
+
+function straightClear(r1,c1,r2,c2,b){
+  if(r1!==r2 && c1!==c2) return false;
+  let dr=sign(r2-r1), dc=sign(c2-c1);
+  let r=r1+dr,c=c1+dc;
+  while(r!==r2||c!==c2){ if(b[r][c]) return false; r+=dr;c+=dc; }
+  return true;
+}
+
+function diagonalClear(r1,c1,r2,c2,b){
+  if(Math.abs(r2-r1)!==Math.abs(c2-c1)) return false;
+  let dr=sign(r2-r1), dc=sign(c2-c1);
+  let r=r1+dr,c=c1+dc;
+  while(r!==r2){ if(b[r][c]) return false; r+=dr;c+=dc; }
+  return true;
+}
+
+function makeMove(from,to){
+  let piece=board[from.r][from.c];
+
+  if(piece.toLowerCase()==='p' && enPassant && to.r===enPassant.r && to.c===enPassant.c){
+    board[from.r][to.c]='';
+  }
+
+  if(piece.toLowerCase()==='k' && Math.abs(to.c-from.c)===2){
+    if(to.c===6){ board[from.r][5]=board[from.r][7]; board[from.r][7]=''; }
+    else if(to.c===2){ board[from.r][3]=board[from.r][0]; board[from.r][0]=''; }
+  }
+
+  board[to.r][to.c]=piece;
+  board[from.r][from.c]='';
+
+  moved[from.r+'_'+from.c]=true;
+
+  if(piece==='P' && to.r===0){ triggerPromotion(to,'white'); return; }
+  if(piece==='p' && to.r===7){ triggerPromotion(to,'black'); return; }
+
+  enPassant=null;
+  if(piece.toLowerCase()==='p' && Math.abs(to.r-from.r)===2){
+    enPassant={ r:(from.r+to.r)/2, c:from.c };
+  }
+}
+
+function triggerPromotion(pos,color){ pendingPromotion={pos,color}; showPromotion(color); }
+
+function showPromotion(color){
+  const el=document.getElementById('promotion'); el.innerHTML='Choose Promotion:<br>';
+  ['q','r','b','n'].forEach(function(opt){
+    var btn=document.createElement('button'); btn.className='promo-btn';
+    var piece=(color==='white')?opt.toUpperCase():opt;
+    btn.textContent=pieces[piece];
+    btn.onclick=function(){ applyPromotion(piece); };
+    el.appendChild(btn);
+  });
+  el.style.display='block';
+}
+
+function applyPromotion(piece){
+  var pos=pendingPromotion.pos;
+  board[pos.r][pos.c]=piece;
+  pendingPromotion=null;
+  document.getElementById('promotion').style.display='none';
+  turn=(turn==='white')?'black':'white';
+  draw();
+}
+
+function isOwnPiece(p){ return (turn==='white')?(p===p.toUpperCase()):(p===p.toLowerCase()); }
+
+function isValidMove(from,to){
+  const piece=board[from.r][from.c];
+  const target=board[to.r][to.c];
+  if(target && isOwnPiece(target)) return false;
+
+  const dr=to.r-from.r, dc=to.c-from.c;
+
+  switch(piece.toLowerCase()){
+    case 'p':
+      var dir=(piece==='P')?-1:1;
+      if(dc===0 && !target && dr===dir) return true;
+      if(dc===0 && !target && dr===2*dir){
+        if((piece==='P'&&from.r===6)||(piece==='p'&&from.r===1)){
+          if(!board[from.r+dir][from.c]) return true;
+        }
+      }
+      if(Math.abs(dc)===1 && dr===dir){
+        if(target) return true;
+        if(enPassant && to.r===enPassant.r && to.c===enPassant.c) return true;
+      }
+      return false;
+
+    case 'r': return straightClear(from.r,from.c,to.r,to.c,board);
+    case 'b': return diagonalClear(from.r,from.c,to.r,to.c,board);
+    case 'q': return straightClear(from.r,from.c,to.r,to.c,board)||diagonalClear(from.r,from.c,to.r,to.c,board);
+    case 'n': return (Math.abs(dr)===2&&Math.abs(dc)===1)||(Math.abs(dr)===1&&Math.abs(dc)===2);
+
+    case 'k':
+      if(Math.abs(dr)<=1 && Math.abs(dc)<=1) return true;
+
+      if(dr===0 && Math.abs(dc)===2){
+        const row=from.r;
+        if(moved[row+'_4']) return false;
+
+        if(dc===2){
+          if(board[row][5]||board[row][6]) return false;
+          if(moved[row+'_7']) return false;
+          if(isSquareAttacked(row,4,turn==='white'?'black':'white',board)) return false;
+          if(isSquareAttacked(row,5,turn==='white'?'black':'white',board)) return false;
+          if(isSquareAttacked(row,6,turn==='white'?'black':'white',board)) return false;
+          return true;
+        }
+
+        if(dc===-2){
+          if(board[row][1]||board[row][2]||board[row][3]) return false;
+          if(moved[row+'_0']) return false;
+          if(isSquareAttacked(row,4,turn==='white'?'black':'white',board)) return false;
+          if(isSquareAttacked(row,3,turn==='white'?'black':'white',board)) return false;
+          if(isSquareAttacked(row,2,turn==='white'?'black':'white',board)) return false;
+          return true;
+        }
+      }
+
+      return false;
+  }
+  return false;
+}
+
+function sign(x){ return x>0?1:x<0?-1:0; }
+function capitalize(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+function resetGame(){ initBoard(); }
+
+initBoard();
+</script>
+
+</body>
+</html>
