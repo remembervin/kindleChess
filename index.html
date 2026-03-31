@@ -41,13 +41,6 @@
     font-size: 34px;
   }
 
-  .square span {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
 /* WHITE pieces → light + thinner */
 .whitePiece {
   font-weight: normal;
@@ -63,6 +56,7 @@
   .dark { background: #aaa; }
   .selected { outline: 3px solid black; }
   .move { outline: 3px dashed black; }
+  .capture { outline: 4px solid black; }
 
   #info { font-size: 20px; margin: 8px; }
   #promotion { display:none; margin:10px; }
@@ -85,6 +79,11 @@
 <div class="controls">
   <button onclick="resign()">Resign</button>
   <button onclick="offerDraw()">Offer Draw</button>
+
+  <span style="margin-left:30px;">
+    <button onclick="flipPieces()">Flip</button>
+  </span>
+
   <button id="acceptDrawBtn" onclick="acceptDraw()" style="display:none;">Accept Draw</button>
 </div>
 
@@ -98,6 +97,7 @@ let enPassant=null, pendingPromotion=null;
 let moved={};
 let gameOver=false;
 let drawOfferedBy=null;
+let flipped = false;
 
 function initBoard(){
   board=[
@@ -128,6 +128,15 @@ function getLegalMoves(from){
   return moves;
 }
 
+function isCaptureMove(from,to){
+  const target = board[to.r][to.c];
+  const piece = board[from.r][from.c];
+
+  if(!target) return false;
+
+  return (piece===piece.toUpperCase()) !== (target===target.toUpperCase());
+}
+
 function draw(){
   const el=document.getElementById('board'); el.innerHTML='';
 
@@ -144,7 +153,8 @@ function draw(){
       if(piece){
         const isWhite = piece === piece.toUpperCase();
         const cls = isWhite ? 'whitePiece' : 'blackPiece';
-        sq.innerHTML = '<span class="' + cls + '">' + pieces[piece] + '</span>';
+		let rotation = flipped ? ' rotate(180deg)' : '';
+		sq.innerHTML = '<span class="'+cls+'" style="transform: translate(-50%, -50%)'+rotation+';">'+pieces[piece]+'</span>';
       } else {
         sq.innerHTML = '<span></span>';
       }
@@ -153,13 +163,19 @@ function draw(){
         sq.className += ' selected';
       }
 
-      // highlight legal moves
-      for(let i=0;i<legalMoves.length;i++){
-        if(legalMoves[i].r===r && legalMoves[i].c===c){
-          sq.className += ' move';
-          break;
-        }
-      }
+	// highlight moves vs captures
+	for(let i=0;i<legalMoves.length;i++){
+	  if(legalMoves[i].r===r && legalMoves[i].c===c){
+
+		if(selected && isCaptureMove(selected,{r:r,c:c})){
+		  sq.className += ' capture';
+		} else {
+		  sq.className += ' move';
+		}
+
+		break;
+	  }
+	}
 
       (function(rr,cc){ sq.onclick=function(){handleTap(rr,cc);} })(r,c);
       el.appendChild(sq);
@@ -258,6 +274,11 @@ function isLegalMove(from,to){
 function isCheck(color,b=board){
   const king=findKing(color,b);
   return isSquareAttacked(king.r,king.c,color==='white'?'black':'white',b);
+}
+
+function flipPieces(){
+  flipped = !flipped;
+  draw();
 }
 
 function isCheckmate(color){ if(!isCheck(color)) return false; return !hasMoves(color); }
