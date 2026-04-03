@@ -41,11 +41,31 @@
     font-size: 34px;
   }
 
+  .checkingPiece {
+	  outline: 3px dotted black;
+	}
+
+  .lastmove {
+	  outline: 3px solid #333;
+	}
+
+	.lastmoveTo {
+	  outline: 4px solid black;
+	}
+
+	.checkmateGlow {
+	  box-shadow: 0 0 10px 4px black inset;
+	}
+
 /* WHITE pieces → light + thinner */
 .whitePiece {
   font-weight: normal;
   opacity: 1;
   text-shadow: 0 0 1px black;
+}
+
+.capture {
+  background: #666 !important;
 }
 
 /* BLACK pieces → bold + darker */
@@ -98,6 +118,11 @@ let moved={};
 let gameOver=false;
 let drawOfferedBy=null;
 let flipped = false;
+let statusMessage = '';
+
+let lastMove = null;
+let checkmateSquare = null;
+let checkingPieceSquare = null;
 
 function initBoard(){
   board=[
@@ -110,9 +135,24 @@ function initBoard(){
     ['P','P','P','P','P','P','P','P'],
     ['R','N','B','Q','K','B','N','R']
   ];
-  enPassant=null; turn='white'; selected=null; pendingPromotion=null; moved={};
-  gameOver=false; drawOfferedBy=null;
+
+  enPassant=null;
+  turn='white';
+  selected=null;
+  pendingPromotion=null;
+  moved={};
+  gameOver=false;
+  drawOfferedBy=null;
+
+  lastMove = null;
+  checkmateSquare = null;
+  checkingPieceSquare = null;
+
+  // ✅ CRITICAL FIX
+  statusMessage = '';
+
   document.getElementById('acceptDrawBtn').style.display='none';
+
   draw();
 }
 
@@ -120,7 +160,7 @@ function getLegalMoves(from){
   const moves=[];
   for(let r=0;r<8;r++){
     for(let c=0;c<8;c++){
-      if(isValidMove(from,{r,c}) && isLegalMove(from,{r,c})){
+      if(isValidMove(from,{r,c})){
         moves.push({r,c});
       }
     }
@@ -140,6 +180,35 @@ function draw(){
     for(let c=0;c<8;c++){
       const sq=document.createElement('div');
       sq.className='square '+((r+c)%2?'dark':'light');
+	  // LAST MOVE highlight
+	if(lastMove && lastMove.from && lastMove.to){
+	  if(lastMove.from.r===r && lastMove.from.c===c){
+		sq.className += ' lastmove';
+	  }
+	  if(lastMove.to.r===r && lastMove.to.c===c){
+		sq.className += ' lastmoveTo';
+	  }
+	}
+
+	// CHECKMATE highlight
+	if(checkmateSquare &&
+	   typeof checkmateSquare.r === 'number' &&
+	   typeof checkmateSquare.c === 'number' &&
+	   checkmateSquare.r===r &&
+	   checkmateSquare.c===c){
+	  sq.className += ' checkmateGlow';
+	}
+	
+	// CHECKING PIECE highlight
+	if(checkingPieceSquare &&
+	   typeof checkingPieceSquare.r === 'number' &&
+	   typeof checkingPieceSquare.c === 'number' &&
+	   checkingPieceSquare.r===r &&
+	   checkingPieceSquare.c===c){
+
+	  sq.className += ' checkingPiece';
+	}
+
       const piece = board[r][c];
       if(piece){
         const isWhite = piece === piece.toUpperCase();
@@ -167,24 +236,30 @@ function draw(){
     }
   }
 
-  let msg='Turn: '+capitalize(turn);
+	let msg = statusMessage ? statusMessage : ('Turn: ' + capitalize(turn));
 
-  if(gameOver){
-  } else if(isCheckmate(turn)){
-    msg='Checkmate! '+(turn==='white'?'Black':'White')+' wins';
-    gameOver=true;
-  } else if(isStalemate(turn)){
-    msg='Stalemate! Draw';
-    gameOver=true;
-  } else if(isCheck(turn)){
-    msg='Check! '+msg;
+	if(!gameOver && isCheck(turn)){
+	  msg = 'Check! ' + msg;
+	}
+
+	if(drawOfferedBy && !gameOver){
+	msg += ' | Draw offered by ' + capitalize(drawOfferedBy);
+	}
+
+	document.getElementById('info').textContent=msg;
+}
+
+function hasKings(){
+  let w=false, b=false;
+
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      if(board[r][c]==='K') w=true;
+      if(board[r][c]==='k') b=true;
+    }
   }
 
-  if(drawOfferedBy && !gameOver){
-    msg += ' | Draw offered by ' + capitalize(drawOfferedBy);
-  }
-
-  document.getElementById('info').textContent=msg;
+  return w && b;
 }
 
 function handleTap(r,c){
@@ -206,6 +281,37 @@ function handleTap(r,c){
         makeMove(selected,{r,c});
         if(!pendingPromotion){
           turn=(turn==='white')?'black':'white';
+		  // RESET highlights
+		checkmateSquare = null;
+		checkingPieceSquare = null;
+
+		// Now evaluate using UPDATED turn
+		if(isCheckmate(turn)){
+
+		  gameOver = true;
+
+		  statusMessage = 'Checkmate! ' + (turn==='white'?'Black':'White') + ' wins';
+
+		  const king = findKing(turn, board);
+		  if(king){
+			checkmateSquare = {r: king.r, c: king.c};
+		  }
+
+		  const attacker = findCheckingPiece(turn, board);
+		  if(attacker){
+			checkingPieceSquare = attacker;
+		  }
+
+		}
+		else if(isCheck(turn)){
+
+		  const attacker = findCheckingPiece(turn, board);
+		  if(attacker){
+			checkingPieceSquare = attacker;
+		  }
+
+		}
+		  
           drawOfferedBy=null;
           document.getElementById('acceptDrawBtn').style.display='none';
         }
@@ -239,25 +345,68 @@ function acceptDraw(){
   document.getElementById('acceptDrawBtn').style.display='none';
 }
 
+function findCheckingPiece(color, b=board){
+
+  const king = findKing(color, b);
+  if(!king) return null;
+
+  const opponent = (color==='white') ? 'black' : 'white';
+
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+
+      const p = b[r][c];
+      if(!p) continue;
+
+      const isWhite = p===p.toUpperCase();
+
+      if(opponent==='white' && !isWhite) continue;
+      if(opponent==='black' && isWhite) continue;
+
+      if(isValidMove({r,c}, king)){
+        return {r,c};
+      }
+
+    }
+  }
+
+  return null;
+}
+
 function cloneBoard(b){ return JSON.parse(JSON.stringify(b)); }
 
 function isLegalMove(from,to){
-  const temp=cloneBoard(board);
-  const piece=temp[from.r][from.c];
 
-  if(piece.toLowerCase()==='k' && Math.abs(to.c-from.c)===2){
-    if(to.c===6){ temp[from.r][5]=temp[from.r][7]; temp[from.r][7]=''; }
-    else if(to.c===2){ temp[from.r][3]=temp[from.r][0]; temp[from.r][0]=''; }
+  const temp = cloneBoard(board);
+  let piece = temp[from.r][from.c];
+
+  // ---------------- EN PASSANT ----------------
+  if(piece.toLowerCase()==='p' && enPassant &&
+     to.r===enPassant.r && to.c===enPassant.c){
+
+    temp[from.r][to.c] = '';
   }
 
-  temp[to.r][to.c]=piece;
-  temp[from.r][from.c]='';
+  // ---------------- MOVE ----------------
+  temp[to.r][to.c] = piece;
+  temp[from.r][from.c] = '';
 
-  return !isCheck(turn,temp);
+  // ---------------- PROMOTION (simulation) ----------------
+  if(piece === 'P' && to.r === 0){
+    temp[to.r][to.c] = 'Q';
+  }
+  if(piece === 'p' && to.r === 7){
+    temp[to.r][to.c] = 'q';
+  }
+
+  const color = (piece === piece.toUpperCase()) ? 'white' : 'black';
+
+  return !isCheck(color, temp);
 }
 
 function isCheck(color,b=board){
   const king=findKing(color,b);
+  if(!king) return false; // safety
   return isSquareAttacked(king.r,king.c,color==='white'?'black':'white',b);
 }
 
@@ -266,22 +415,46 @@ function flipPieces(){
   draw();
 }
 
-function isCheckmate(color){ if(!isCheck(color)) return false; return !hasMoves(color); }
-function isStalemate(color){ if(isCheck(color)) return false; return !hasMoves(color); }
+function isCheckmate(color){
+
+  if(!isCheck(color)) return false;
+
+  if(hasMoves(color)) return false;
+
+  return true;
+}
+
+function isStalemate(color){
+
+  if(isCheck(color)) return false;
+
+  return !hasMoves(color);
+}
 
 function hasMoves(color){
+
   for(let r=0;r<8;r++){
     for(let c=0;c<8;c++){
+
       const p=board[r][c];
-      if(p && ((color==='white'&&p===p.toUpperCase())||(color==='black'&&p===p.toLowerCase()))){
-        for(let r2=0;r2<8;r2++){
-          for(let c2=0;c2<8;c2++){
-            if(isValidMove({r,c},{r:r2,c:c2}) && isLegalMove({r,c},{r:r2,c:c2})) return true;
+      if(!p) continue;
+
+      if(color==='white' && p!==p.toUpperCase()) continue;
+      if(color==='black' && p!==p.toLowerCase()) continue;
+
+      for(let r2=0;r2<8;r2++){
+        for(let c2=0;c2<8;c2++){
+
+          if(isValidMove({r,c},{r:r2,c:c2}) &&
+             isLegalMove({r,c},{r:r2,c:c2})){
+            return true;
           }
+
         }
       }
     }
   }
+
   return false;
 }
 
@@ -355,6 +528,12 @@ function makeMove(from,to){
   if(piece.toLowerCase()==='p' && Math.abs(to.r-from.r)===2){
     enPassant={ r:(from.r+to.r)/2, c:from.c };
   }
+  
+  lastMove = {
+  from: {r: from.r, c: from.c},
+  to: {r: to.r, c: to.c}
+}
+
 }
 
 function triggerPromotion(pos,color){ pendingPromotion={pos,color}; showPromotion(color); }
